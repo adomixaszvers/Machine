@@ -5,9 +5,15 @@
  */
 package machine;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.Console;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.util.Random;
+import java.util.Scanner;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import static machine.Utils.*;
@@ -38,11 +44,11 @@ public class Machine {
     public byte PI;
     public byte SI;
     public byte TI;
-    
     public char X, Y;
     public int channelNumber;
     public Console console = System.console();
     public byte channelDeviceBuffer[] = new byte[40];
+    public Scanner sc;
 
     /*
      * @param args the command line arguments
@@ -60,19 +66,12 @@ public class Machine {
     public int realAddress(char x, char y) throws CastException {
         int block = byteToInt(PLR[2]) * 10 + byteToInt(PLR[3]);
         int a2 = memory[block + charToInt(x) * WORD_SIZE + 3];
-        return a2 * 10 + charToInt(y);
+        return (a2 * 10 + charToInt(y))*WORD_SIZE;
     }
 
-    public void loader(String filename) throws FileNotFoundException, Exception {
-        /*
-         if (filename == null)
-         filename = "";
-         File file = new File(filename);
-         if (!file.canRead())
-         throw new FileNotFoundException("Cannot read the file, doh.");
-         */
+    public void loader() throws CastException {
+
         int from = 4 * BLOCK_SIZE * WORD_SIZE;
-        System.out.println("From " + from);
         for (int i = 0; i < 40; i++) {
             memory[from + i] = intToByte(10 + i);
         }
@@ -80,25 +79,6 @@ public class Machine {
         for (int i = 0; i < BLOCK_SIZE; i++) {
             memory[i * WORD_SIZE + 3] = memory[from + i];
         }
-        /*
-         BufferedReader inputStream = null;
-         try {
-         inputStream = new BufferedReader(new FileReader(filename));
-         String l;
-         l = inputStream.readLine();
-         if(!l.startsWith("$WOW"))
-         throw new Exception("Invalid program label "+l);
-         l = inputStream.readLine();
-         }
-         catch (IOException ex) {
-         Logger.getLogger(Machine.class.getName()).log(Level.SEVERE, null, ex);
-         }
-         finally {
-         if (inputStream != null) {
-         inputStream.close();
-         }
-         }
-         */
     }
 
     public void swap(byte[] memory, int from, int to) {
@@ -117,43 +97,53 @@ public class Machine {
         }
     }
 
-    public static void main(String[] args) throws CastException {
+    public static void main(String[] args) throws CastException, MachineException {
         // TODO code application logic here
         Machine machine = new Machine();
-        int from = 4 * BLOCK_SIZE * WORD_SIZE;
-        for (int i = 0; i < 40; i++) {
-            System.out.println(machine.memory[from + i]);
-        }
+        /*String s = "LA90";
+        char ch[] =  {s.charAt(0),s.charAt(1),s.charAt(2),s.charAt(3)};
+        byte bytes[] = new byte [4];
+        for(int i=0; i<4; i++) {
+            bytes[i]=charToByte(ch[i]);
+            System.out.println(byteToChar(bytes[i]));
+        }*/
+        //machine.loader();
+        Loader ld = new Loader(machine);
         try {
-            machine.loader(null);
-        } catch (FileNotFoundException e) {
-            System.err.println(e);
-        } catch (Exception ex) {
+            ld.loader("test.txt");
+        } catch (FileNotFoundException ex) {
+            Logger.getLogger(Machine.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (IOException ex) {
             Logger.getLogger(Machine.class.getName()).log(Level.SEVERE, null, ex);
         }
-        //machine.shuffle(machine.memory, from, from+40, 10);
-        System.out.println("WOW");
-        for (int i = 0; i < 40; i++) {
-            System.out.println(machine.memory[from + i]);
-        }
-        System.out.println("WOOF");
-        for (int i = 0; i < 10; i++) {
-            for (int j = 0; j < 4; j++) {
-                System.out.print(machine.memory[i * 4 + j] + " ");
+        machine.IC[0] = charToByte(intToChar(0));
+        machine.IC[1] = charToByte(intToChar(0));
+        //machine.printMemory();
+        while (true) {
+            //System.out.println("Channel "+machine.channelNumber);
+            if (byteToInt(machine.CH1) + byteToInt(machine.CH2) + byteToInt(machine.CH3) == 0) {
+                machine.printRegisters();
+                //machine.printMemory();
+                pause();
+                try {
+                    machine.intepreteNextCommand();
+                } catch(MachineException e) {
+                    e.printStackTrace();
+                    break;
+                }
             }
-            System.out.println();
+            machine.TI = intToByte(byteToInt(machine.TI) - 1);
+            try {
+                machine.StartIO();
+            } catch (BufferOverflowException ex) {
+                Logger.getLogger(Machine.class.getName()).log(Level.SEVERE, null, ex);
+                break;
+            } catch (IOException ex) {
+                Logger.getLogger(Machine.class.getName()).log(Level.SEVERE, null, ex);
+                break;
+            }
+            machine.checkInterrupt();
         }
-        System.out.println();
-        char x = '5';
-        char y = '9';
-        //System.out.println(machine.realAddress(x, y));
-        machine.commandLA(x, y);
-        System.out.println("PI = " + machine.PI);
-        machine.C = intToByte(1);
-        machine.resetC();
-        machine.setSF(true);
-        System.out.println("C = " + machine.C);
-        System.out.println(byteToInt(intToByte(255)));
     }
 
     public void resetC() {
@@ -161,15 +151,15 @@ public class Machine {
     }
 
     public void setSF(boolean val) {
-        C = (byte) (val? (C | 0b00000100): (C^0b00000100));
+        C = (byte) (val ? (C | 0b00000100) : (C ^ 0b00000100));
     }
 
     public void setOF(boolean val) {
-        C = (byte) (val? (C | 0b00000010): (C^0b00000010));
+        C = (byte) (val ? (C | 0b00000010) : (C ^ 0b00000010));
     }
 
     public void setZF(boolean val) {
-        C = (byte) (val? (C | 0b00000001): (C^0b00000001));
+        C = (byte) (val ? (C | 0b00000001) : (C ^ 0b00000001));
     }
 
     public boolean getSF() {
@@ -183,13 +173,15 @@ public class Machine {
     public boolean getZF() {
         return ((C & 0b00000100) > 0) ? true : false;
     }
+
     public void incIC() throws CastException {
-        int x=byteToInt(IC[0]);
-        int y=byteToInt(IC[1]);
-        int IC_int = x*10+y;
+        //System.out.println("IC");
+        int x = charToInt(byteToChar(IC[0]));
+        int y = charToInt(byteToChar(IC[1]));
+        int IC_int = x * 10 + y;
         IC_int++;
-        IC[0] = intToByte(IC_int/10);
-        IC[1] = intToByte(IC_int%10);
+        IC[0] = charToByte(intToChar(IC_int / 10));
+        IC[1] = charToByte(intToChar(IC_int % 10));
     }
 
     public void commandLA(char x, char y) throws CastException {
@@ -501,7 +493,7 @@ public class Machine {
         try {
             int address = realAddress(x, y);
             int AX_int = wordToInt(BX, 0), BX_int, memory_int = wordToInt(memory, address);
-            if(memory_int == 0) {
+            if (memory_int == 0) {
                 PI = intToByte(3);
                 return;
             }
@@ -519,7 +511,7 @@ public class Machine {
         }
     }
 
-    public void commandDECA(char x, char y) throws CastException {
+    public void commandDECA() throws CastException {
         resetC();
         incIC();
         int AX_int = wordToInt(AX, 0);
@@ -536,7 +528,7 @@ public class Machine {
         intToWord(AX_int, AX, 0);
     }
 
-    public void commandDECB(char x, char y) throws CastException {
+    public void commandDECB() throws CastException {
         resetC();
         incIC();
         int BX_int = wordToInt(BX, 0);
@@ -553,7 +545,7 @@ public class Machine {
         intToWord(BX_int, BX, 0);
     }
 
-    public void commandINCA(char x, char y) throws CastException {
+    public void commandINCA() throws CastException {
         resetC();
         incIC();
         int AX_int = wordToInt(AX, 0);
@@ -570,7 +562,7 @@ public class Machine {
         intToWord(AX_int, AX, 0);
     }
 
-    public void commandINCB(char x, char y) throws CastException {
+    public void commandINCB() throws CastException {
         resetC();
         incIC();
         int BX_int = wordToInt(BX, 0);
@@ -630,28 +622,31 @@ public class Machine {
             PI = intToByte(1);
         }
     }
+
     public void commandIP(char x, char y) throws CastException {
+        incIC();
         try {
             int address = realAddress(x, y);
             X = x;
             Y = y;
             SI = intToByte(1);
-        }
-        catch(ClassCastException e) {
+        } catch (ClassCastException e) {
             PI = intToByte(1);
         }
     }
+
     public void commandOP(char x, char y) throws CastException {
+        incIC();
         try {
             int address = realAddress(x, y);
             X = x;
             Y = y;
             SI = intToByte(2);
-        }
-        catch(ClassCastException e) {
+        } catch (ClassCastException e) {
             PI = intToByte(1);
         }
     }
+
     public void commandJP(char x, char y) throws CastException {
         IC[0] = charToByte(x);
         IC[1] = charToByte(y);
@@ -722,82 +717,377 @@ public class Machine {
             setZF(val);
         }
     }
+
     public void commandGEIC() throws CastException {
         intToWord(0, BX, 0);
         BX[2] = IC[0];
         BX[3] = IC[1];
         incIC();
     }
+
     public void commandSEIC() {
         IC[0] = BX[2];
         IC[1] = BX[3];
     }
-    public void StartIO() throws CastException, BufferOverflowException {
-        if(channelNumber==1) {
-           CH1 = intToByte(1);
-           String input = console.readLine("Plz enter somthing WOW: ");
-           int len = input.length();
-           if (len>40)
-               len = 40;
-           for(int i=0; i<len; i++) {
-               try {
-                   channelDeviceBuffer[i] = charToByte(input.charAt(i));
-               } 
-               catch (ClassCastException e) {
-                   channelDeviceBuffer[i] = charToByte('?');
-               }
-           }
-           if(len<40) {
-               channelDeviceBuffer[len] = charToByte('#');
-           }
-           int startPoz = charToInt(X)*10+charToInt(Y);
-           outerloopCH1:
-           for(int i=0; i<BLOCK_SIZE; i++) {
-               try {
-                    char x = intToChar((startPoz+i)/10);
-                    char y = intToChar((startPoz+i)%10);
+
+    public void StartIO() throws CastException, BufferOverflowException, IOException {
+        if (channelNumber == 1) {
+            channelNumber = 0;
+            CH1 = intToByte(1);
+            BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+            String input = br.readLine();
+            int len = input.length();
+            if (len > 40) {
+                len = 40;
+            }
+            for (int i = 0; i < len; i++) {
+                try {
+                    channelDeviceBuffer[i] = charToByte(input.charAt(i));
+                } catch (ClassCastException e) {
+                    channelDeviceBuffer[i] = charToByte('?');
+                }
+            }
+            if (len < 40) {
+                channelDeviceBuffer[len] = charToByte('#');
+            }
+            int startPoz = charToInt(X) * 10 + charToInt(Y);
+            outerloopCH1:
+            for (int i = 0; i < BLOCK_SIZE; i++) {
+                try {
+                    char x = intToChar((startPoz + i) / 10);
+                    char y = intToChar((startPoz + i) % 10);
                     int address = realAddress(x, y);
-                    for(int j=0; j<4; j++) {
-                        if(channelDeviceBuffer[i*WORD_SIZE+j] == '#') {
+                    for (int j = 0; j < 4; j++) {
+                        if (channelDeviceBuffer[i * WORD_SIZE + j] == '#') {
                             break outerloopCH1;
                         }
-                        memory[address+j] = channelDeviceBuffer[i*WORD_SIZE+j];
+                        memory[address + j] = channelDeviceBuffer[i * WORD_SIZE + j];
                     }
-               }
-               catch(ClassCastException e) {
-                   throw new BufferOverflowException("Do not write a poem.");
-               }
-           }
-           CH1 = intToByte(0);
-           IOI = intToByte(byteToInt(IOI)+1);
+                } catch (CastException e) {
+                    throw new BufferOverflowException("Do not write a poem.");
+                }
+            }
+            CH1 = intToByte(0);
+            IOI = intToByte(byteToInt(IOI) + 1);
         }
-        if(channelNumber==2) {
-           CH2 = intToByte(1);
-           int startPoz = charToInt(X)*10+charToInt(Y);
-           outerloopCH2:
-           for(int i=0; i<10; i++) {
-               try {
-                   char x = intToChar((startPoz+i)/10);
-                   char y = intToChar((startPoz+i)%10);
-                   int address = realAddress(x, y);
-                   for(int j=0; j<4; j++) {
-                        channelDeviceBuffer[i*WORD_SIZE+j] = memory[address+j];
-                        if(memory[address+j] == '#') {
+        if (channelNumber == 2) {
+            channelNumber = 0;
+            CH2 = intToByte(1);
+            int startPoz = charToInt(X) * 10 + charToInt(Y);
+            outerloopCH2:
+            for (int i = 0; i < 10; i++) {
+                try {
+                    char x = intToChar((startPoz + i) / 10);
+                    char y = intToChar((startPoz + i) % 10);
+                    int address = realAddress(x, y);
+                    for (int j = 0; j < 4; j++) {
+                        channelDeviceBuffer[i * WORD_SIZE + j] = memory[address + j];
+                        if (memory[address + j] == '#') {
                             break outerloopCH2;
                         }
                     }
-               }
-               catch(ClassCastException e) {
-                   throw new BufferOverflowException("Do not write a poem.");
-               }
-           }
-           CH2 = intToByte(0);
-           IOI = intToByte(byteToInt(IOI)+2);
+                } catch (CastException e) {
+                    throw new BufferOverflowException("Do not write a poem.");
+                }
+            }
+            for(int i=0;i<40;i++) {
+                if(channelDeviceBuffer[i]==charToByte('#')) {
+                    System.out.println();
+                    break;
+                }
+                System.out.write(byteToInt(channelDeviceBuffer[i]));
+            }
+            CH2 = intToByte(0);
+            IOI = intToByte(byteToInt(IOI) + 2);
         }
-        if(channelNumber==3) {
+        if (channelNumber == 3) {
+            channelNumber = 0;
             CH3 = intToByte(1);
             CH3 = intToByte(0);
-            IOI = intToByte(byteToInt(IOI)+4);
+            IOI = intToByte(byteToInt(IOI) + 4);
         }
     }
+
+    public void intepreteNextCommand() throws CastException, MachineException {
+        try {
+            char x = byteToChar(IC[0]);
+            char y = byteToChar(IC[1]);
+            int address = realAddress(x, y);
+            String command = "";
+            for (int i = 0; i < 4; i++) {
+                command += byteToChar(memory[address + i]);
+            }
+            //System.out.println("\t"+command);
+            String commandStart = command.substring(0, 2);
+            x = command.charAt(2);
+            y = command.charAt(3);
+            switch (commandStart) {
+                case "LA":
+                    if (x == 'f' && y == 'B') {
+                        commandLAfB();
+                    } else {
+                        commandLA(x, y);
+                    }
+                    break;
+                case "LB":
+                    if (x == 'f' && y == 'A') {
+                        commandLBfA();
+                    } else {
+                        commandLB(x, y);
+                    }
+                    break;
+                case "SA":
+                    commandSA(x, y);
+                    break;
+                case "SB":
+                    commandSB(x, y);
+                    break;
+                case "CO":
+                    if (x == 'P' && y == 'A') {
+                        commandCOPA();
+                    } else if (x == 'P' && y == 'B') {
+                        commandCOPB();
+                    } else {
+                        throw new MachineException(command);
+                    }
+                    break;
+                case "AW":
+                    commandAW(x);
+                    break;
+                case "AA":
+                    commandAA(x, y);
+                    break;
+                case "AB":
+                    commandAB(x, y);
+                    break;
+                case "BA":
+                    commandBA(x, y);
+                    break;
+                case "BB":
+                    commandBB(x, y);
+                    break;
+                case "MA":
+                    commandMA(x, y);
+                    break;
+                case "MB":
+                    commandMB(x, y);
+                    break;
+                case "DA":
+                    commandDA(x, y);
+                    break;
+                case "DE":
+                    if (x == 'C' && y == 'A') {
+                        commandDECA();
+                    } else if (x == 'C' && y == 'B') {
+                        commandDECB();
+                    } else {
+                        throw new MachineException(command);
+                    }
+                    break;
+                case "IN":
+                    if (x == 'C' && y == 'A') {
+                        commandINCA();
+                    } else if (x == 'C' && y == 'B') {
+                        commandINCB();
+                    } else {
+                        throw new MachineException(command);
+                    }
+                    break;
+                case "CA":
+                    commandCA(x, y);
+                    break;
+                case "CB":
+                    commandCB(x, y);
+                    break;
+                case "IP":
+                    commandIP(x, y);
+                    break;
+                case "OP":
+                    commandOP(x, y);
+                    break;
+                case "JP":
+                    commandJP(x, y);
+                    break;
+                case "JE":
+                    commandJE(x, y);
+                    break;
+                case "JL":
+                    commandJL(x, y);
+                    break;
+                case "JG":
+                    commandJG(x, y);
+                    break;
+                case "HA":
+                    if (x == 'L' && y == 'T') {
+                        commandHALT();
+                    } else {
+                        throw new MachineException(command);
+                    }
+                    break;
+                case "GE":
+                    if (x == 'C') {
+                        commandGEC(y);
+                    } else if (x == 'I' && y == 'C') {
+                        commandGEIC();
+                    } else {
+                        throw new MachineException(command);
+                    }
+                    break;
+                case "SE":
+                    if (x == 'C') {
+                        commandSEC(y);
+                    } else if (x == 'I' && y == 'C') {
+                        commandSEIC();
+                    } else {
+                        throw new MachineException(command);
+                    }
+                    break;
+                default:
+                    incIC();
+                    throw new MachineException(command);
+            }
+        } catch (MachineException e) {
+            PI = intToByte(1);
+            throw e;
+        }
+    }
+
+    public void checkInterrupt() throws CastException {
+
+        if (byteToInt(TI) == 0) {
+            System.out.println("Program has exceeded its time limit");
+            MODE = 1;
+            restartTimer();
+            MODE = 0;
+        }
+
+        if (byteToInt(PI) != 0) {
+            switch (byteToInt(PI)) {
+                case 1:
+                    System.out.println("PROGRAM INTERRUPT! Incorrect command");
+                    MODE = 1;
+                    stopProgram();
+                    break;
+                case 2:
+                    System.out.println("PROGRAM INTERRUPT! Negative result");
+                    MODE = 1;
+                    stopProgram();
+                    break;
+                case 3:
+                    System.out.println("PROGRAM INTERRUPT! Division by zero");
+                    MODE = 1;
+                    stopProgram();
+                    break;
+                case 4:
+                    System.out.println("PROGRAM INTERRUPT! Program overflow!");
+                    MODE = 1;
+                    stopProgram();
+                    break;
+            }
+        }
+
+        if (byteToInt(SI) != 0) {
+            switch (byteToInt(SI)) {
+                case 1:
+                    System.out.println("PROGRAM INTERRUPT! Data input!");
+                    MODE = 1;
+                    channelNumber = 1;
+                    MODE = 0;
+                    SI = 0;
+                    break;
+                case 2:
+                    System.out.println("PROGRAM INTERRUPT! Data output!");
+                    MODE = 1;
+                    channelNumber = 2;
+                    MODE = 0;
+                    SI = 0;
+                    break;
+                case 3:
+                    System.out.println("PROGRAM INTERRUPT! Command halt!");
+                    MODE = 1;
+                    stopProgram();
+                    break;
+            }
+        }
+        if (byteToInt(IOI) != 0) {
+            switch (byteToInt(IOI)) {
+                case 1:
+                    System.out.println("Channel 1 done");
+                    MODE = 1;
+                    IOI= 0;
+                    MODE = 0;
+                    break;
+                case 2:
+                    System.out.println("Channel 2 done");
+                    MODE = 1;
+                    IOI= 0;
+                    MODE = 0;
+                    break;
+                case 4:
+                    System.out.println("Channel 3 done");
+                    MODE = 1;
+                    IOI= 0;
+                    MODE = 0;
+                    break;
+            }
+        }
+    }
+
+    void restartTimer() throws CastException {
+
+        if (byteToInt(MODE) == 1) {
+            TI = intToByte(100);
+            System.out.println("Supervisor=> Timer restarted successfully. ");
+        }
+    }
+
+    public void stopProgram() {
+        System.out.println("ate");
+        System.exit(0);
+    }
+ 
+    public void printMemory() throws CastException {
+        
+        System.out.println("Memory");
+        for(int i=0; i<100; i++) {
+            System.out.println("i "+i);
+            char x = intToChar(i/10);
+            char y = intToChar(i%10);
+            int address = realAddress(x, y);
+            for(int j=0; j<4; j++) {
+                System.out.print(byteToChar(memory[address+j]));
+            }
+            System.out.println();
+        }
+    }
+    public void printRegisters() {
+        System.out.print("AX = ");
+        for(int i=0; i<4; i++) {
+            System.out.print("|"+byteToInt(AX[i]));
+        }
+        System.out.println();
+        System.out.print("BX = ");
+        for(int i=0; i<4; i++) {
+            System.out.print("|"+byteToInt(BX[i]));
+        }
+        System.out.println();
+        System.out.print("IC = ");
+        for(int i=0; i<2; i++) {
+            System.out.print("|"+byteToInt(IC[i]));
+        }
+        System.out.println();
+        System.out.println("C = "+byteToInt(C));
+        System.out.println("CH1 = "+byteToInt(CH1));
+        System.out.println("CH2 = "+byteToInt(CH2));
+        System.out.println("CH3 = "+byteToInt(CH3));
+        System.out.println("IOI = "+byteToInt(IOI));
+        System.out.println("PI = "+byteToInt(PI));
+        System.out.println("SI = "+byteToInt(SI));
+        System.out.println("TI = "+byteToInt(TI));
+    }
+    public static void pause(){
+
+          System.out.println("Press Any Key To Continue...");
+          new java.util.Scanner(System.in).nextLine();
+     }
 }
